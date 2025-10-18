@@ -9,6 +9,13 @@ def setupNeoForge() {
     def accessWidenerExists = accessWidenerFile.exists()
     def accessTransformerFile = layout.buildDirectory.dir("resources/main/META-INF").map { it.file("accesstransformer.cfg") }
 
+    sourceSets.main.resources {
+        def generatedDir = project(":common").file("src/main/generated")
+        if (generatedDir.exists()) {
+            srcDirs += generatedDir
+        }
+    }
+
     // Task to copy the access transformer file
     tasks.register("generateAccessTransformer") {
         if (!accessWidenerExists) {
