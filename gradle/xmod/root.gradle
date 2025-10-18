@@ -1,0 +1,156 @@
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+
+def ensureProperty(String propertyName) {
+    if (!project.hasProperty(propertyName)) {
+        throw new GradleException("Property '${propertyName}' is not set for project ${project.name}")
+    }
+}
+
+def setupRoot(Closure configClosure) {
+    def config = new SetupConfig()
+    configClosure.delegate = config
+    configClosure.resolveStrategy = Closure.DELEGATE_FIRST
+    configClosure()
+
+    def javaVersion = config.javaVersion ?: JavaLanguageVersion.of(21)
+    def props = config.properties
+
+    ensureProperty("minecraft_version")
+    ensureProperty("mod_version")
+    ensureProperty("mod_id")
+
+    allprojects {
+        apply plugin: 'idea'
+        apply plugin: 'java-library'
+        apply plugin: 'maven-publish'
+
+        java {
+            toolchain {
+                languageVersion = javaVersion
+            }
+        }
+
+        tasks.withType(JavaCompile).configureEach {
+            options.encoding = 'UTF-8'
+        }
+
+        idea {
+            module {
+                downloadSources = true
+                downloadJavadoc = true
+            }
+        }
+
+        // Ensure the wrapper is configured only once (in the root project)
+        if (project == rootProject) {
+            tasks.named('wrapper', Wrapper).configure {
+                distributionType = Wrapper.DistributionType.BIN
+            }
+        }
+
+        repositories {
+            mavenCentral()
+            maven {
+                url = uri("https://cursemaven.com/")
+                content {
+                    includeGroup("curse.maven")
+                }
+            }
+        }
+    }
+
+    subprojects {
+        base {
+            archivesName = "${rootProject.base.archivesName.get()}-${project.name}"
+        }
+
+        repositories {
+            // maven {
+            //     url "https://libraries.minecraft.net"
+            //     content {
+            //         includeModule("org.lwjgl", "lwjgl-freetype")
+            //     }
+            // }
+        }
+
+        if (project.name != "common") {
+            dependencies {
+                api project(":common")
+            }
+
+            jar {
+                from project(":common").sourceSets.main.output
+            }
+        }
+
+        def replaceProperties = [
+            version: version,
+        ]
+
+        // Add custom properties to replace
+        replaceProperties.putAll(props)
+
+        processResources {
+            inputs.properties replaceProperties
+
+            filesMatching(["META-INF/neoforge.mods.toml", "fabric.mod.json", "META-INF/mods.toml", "*.mixins.json"]) {
+                expand replaceProperties
+            }
+        }
+
+        publishing {
+            repositories {
+                def token = config.maven.token?.getOrNull()
+                def username = config.maven.username
+                def url = config.maven.url
+                if (token != null && username != null && url != null) {
+                    maven {
+                        url = uri(url)
+                        credentials {
+                            username = username
+                            password = token
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+class SetupConfig {
+    JavaLanguageVersion javaVersion
+    MavenConfig maven = new MavenConfig()
+    Map<String, String> properties = [:]
+
+    void maven(Closure configClosure) {
+        configClosure.delegate = maven
+        configClosure.resolveStrategy = Closure.DELEGATE_FIRST
+        configClosure.call()
+    }
+}
+
+class MavenConfig {
+    String url
+    String username
+    Provider<String> token
+}
+
+def createVersion(String minecraftVersion, String modVersion) {
+    if (modVersion == null || modVersion.isEmpty() || modVersion.contains(".")) {
+        throw new IllegalArgumentException("Mod version must be provided and cannot contain dots")
+    }
+
+    String[] splitMcVer = minecraftVersion.split("\\.")
+    if (splitMcVer.length < 2) {
+        throw new IllegalArgumentException("Minecraft version must have at least major and minor parts")
+    }
+
+    String minor = splitMcVer[1]
+    String patch = splitMcVer.length >= 3 ? splitMcVer[2] : "0"
+    return "${minor}.${patch}.${modVersion}"
+}
+
+ext {
+    setupRoot = this.&setupRoot
+    createVersion = this.&createVersion
+}

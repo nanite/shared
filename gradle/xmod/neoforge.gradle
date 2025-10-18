@@ -1,0 +1,208 @@
+def setupNeoForge() {
+    if (project.neoforge_version == null) {
+        throw new GradleException("neoforge_version property is not set for project ${project.name}")
+    }
+
+    apply plugin: 'net.neoforged.moddev'
+
+    def accessWidenerFile = project(":common").file("src/main/resources/${project.mod_id}.accesswidener")
+    def accessWidenerExists = accessWidenerFile.exists()
+    def accessTransformerFile = layout.buildDirectory.dir("resources/main/META-INF").map { it.file("accesstransformer.cfg") }
+
+    // Task to copy the access transformer file
+    tasks.register("generateAccessTransformer") {
+        if (!accessWidenerExists) {
+            return // Just don't do anything if no access widener
+        }
+
+        inputs.file(accessWidenerFile)
+        outputs.file(accessTransformerFile)
+
+        doLast {
+            // Ensure output dir exists
+            def file = accessTransformerFile.get().asFile
+            file.parentFile.mkdirs()
+
+            file.text = accessTransformerGenerator(accessWidenerFile.text)
+        }
+    }
+
+    neoForge {
+        version = project.neoforge_version
+        // Set the file from the return of the task
+        if (accessWidenerExists) {
+            accessTransformers = tasks.named("generateAccessTransformer").map {
+                it.outputs.files
+            }
+        }
+
+        runs {
+            // applies to all the run configs below
+            configureEach {
+                systemProperty 'forge.logging.markers', 'REGISTRIES'
+                logLevel = org.slf4j.event.Level.DEBUG
+            }
+
+            client {
+                client()
+                systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            }
+
+            server {
+                server()
+                systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            }
+
+            data {
+                def mcVersionParts = project.minecraft_version.tokenize('.')
+                def minor = mcVersionParts.size() > 1 ? mcVersionParts[1] : '0'
+                def patch = mcVersionParts.size() > 2 ? mcVersionParts[2] : '0'
+
+                if (minor.toInteger() > 21 || (minor.toInteger() == 21 && patch.toInteger() >= 1)) {
+                    clientData()
+                } else {
+                    data()
+                }
+
+                programArguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
+            }
+        }
+
+        mods {
+            "${mod_id}" {
+                sourceSet(sourceSets.main)
+                sourceSet(project(":common").sourceSets.main)
+            }
+        }
+    }
+
+    // This has to be under the neforgeBlock to setup all required tasks
+    tasks.named("processResources") {
+        dependsOn(tasks.named("generateAccessTransformer"))
+    }
+
+    tasks.named("createMinecraftArtifacts") {
+        dependsOn(tasks.named("processResources"))
+    }
+
+    tasks.configureEach { t ->
+        if (t.name.startsWith("createMinecraftArtifacts")) {
+            t.dependsOn(tasks.named("generateAccessTransformer"))
+        }
+    }
+
+    jar {
+        // Exclude the access widener from the output jar
+        exclude("${project.mod_id}.accesswidener")
+    }
+
+    configurations {
+        runtimeClasspath.extendsFrom localRuntime
+    }
+
+    repositories {
+        maven {
+            url "https://maven.neoforged.net/releases"
+        }
+    }
+
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                artifactId = rootProject.archivesBaseName + "-neoforge"
+                from components.java
+            }
+        }
+    }
+
+    java {
+        withSourcesJar()
+    }
+}
+
+/*
+ Access transformer transformation rules:
+
+ public - visible to all classes inside and outside its package
+ protected - visible only to classes inside the package and subclasses
+ default - visible only to classes inside the package
+ private - visible only to inside the class
+
+ A special modifier +f and -f can be appended to the aforementioned modifiers to either add or remove respectively the final modifier, which prevents subclassing, method overriding, or field modification when applied.
+
+ AccessWidener translation rules:
+ classes can be accessible or extendable
+ methods can be accessible or extendable
+ fields can be accessible or mutable
+
+ Extendable:
+    Classes are made public and final is removed
+    Methods are made protected and final is removed
+
+ Accessible:
+    Classes are made public
+    Methods are made public and final if private
+    Fields are made public
+ */
+def accessTransformerGenerator(String input) {
+    StringBuilder output = new StringBuilder()
+    def lines = input.readLines()
+
+    for (String rawLine : lines) {
+        def line = rawLine.trim()
+        if (line.isEmpty() || line.startsWith("#")) continue
+        if (line.startsWith("accessWidener")) continue // skip header
+
+        def parts = line.split(" ")
+        if (parts.length < 3) continue
+
+        def accessType = parts[0]        // accessible / extendable / mutable
+        def targetType = parts[1]        // class / method / field
+        def className = parts[2]         // internal name (slash-separated)
+        def memberName = parts.length > 3 ? parts[3] : ""
+        def descriptor = parts.length > 4 ? parts[4] : ""
+
+        // Convert from / to . for AT syntax
+        def javaName = className.replace('/', '.')
+
+        // Determine AT rule
+        String rule = null
+
+        switch (targetType) {
+            case "class":
+                if (accessType == "accessible") {
+                    rule = "public " + javaName
+                } else if (accessType == "extendable") {
+                    rule = "public-f " + javaName // remove final
+                }
+                break
+
+            case "method":
+                if (accessType == "accessible") {
+                    rule = "public " + javaName + " " + memberName + " " + descriptor
+                } else if (accessType == "extendable") {
+                    rule = "protected-f " + javaName + " " + memberName + " " + descriptor
+                }
+                break
+
+            case "field":
+                if (accessType == "accessible") {
+                    rule = "public " + javaName + " " + memberName
+                } else if (accessType == "mutable") {
+                    rule = "public-f " + javaName + " " + memberName
+                }
+                break
+        }
+
+        if (rule != null) {
+            output.append(rule).append("\n")
+        }
+    }
+
+    return output.toString()
+}
+
+ext {
+    setupNeoForge = this.&setupNeoForge
+    accessTransformerGenerator = this.&accessTransformerGenerator
+}

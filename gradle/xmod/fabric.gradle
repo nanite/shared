@@ -1,0 +1,66 @@
+def setupFabric() {
+    apply plugin: 'fabric-loom'
+
+    fabricApi {
+        configureDataGeneration() {
+            client = true
+            createRunConfiguration = true
+        }
+    }
+
+    loom {
+        def accessWidenerFile = project(":common").file("src/main/resources/${project.mod_id}.accesswidener")
+        if (accessWidenerFile.exists()) {
+            accessWidenerPath = accessWidenerFile
+        }
+
+        runs {
+            client {
+                client()
+                ideConfigGenerated = true
+            }
+
+            server {
+                server()
+                ideConfigGenerated = true
+            }
+        }
+
+        mods {
+            "${mod_id}" {
+                sourceSet sourceSets.main
+                sourceSet("main", project(":common"))
+            }
+        }
+
+        mixin {
+            useLegacyMixinAp = false
+        }
+    }
+
+    dependencies {
+        minecraft "com.mojang:minecraft:${project.minecraft_version}"
+        mappings loom.officialMojangMappings()
+
+        modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+        modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    }
+
+    java {
+        withSourcesJar()
+    }
+
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                artifactId = rootProject.archivesBaseName + "-fabric"
+                from components.java
+            }
+        }
+    }
+
+}
+
+ext {
+    setupFabric = this.&setupFabric
+}

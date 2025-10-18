@@ -1,0 +1,36 @@
+/**
+ * Find the current versions data from the CHANGELOG.md file.
+ */
+def createChangelog() {
+    def changelogFile = rootProject.file("CHANGELOG.md")
+    if (!changelogFile.exists()) {
+        throw new GradleException("CHANGELOG.md file not found in root project.")
+    }
+
+    def projectVersion = rootProject.version
+    def changelogContent = changelogFile.text
+    def changelogOutput = ""
+    def inSection = false
+    for (String line : changelogContent.readLines()) {
+        if (line.startsWith("## ") && line.contains(projectVersion)) {
+            inSection = true
+            continue
+        } else if (line.startsWith("## ") && inSection) {
+            break
+        }
+
+        if (inSection) {
+            changelogOutput += line + "\n"
+        }
+    }
+
+    if (changelogOutput.isEmpty()) {
+        throw new GradleException("No changelog entry found for version ${projectVersion}.")
+    }
+
+    return changelogOutput.trim()
+}
+
+ext {
+    createChangelog = this.&createChangelog
+}

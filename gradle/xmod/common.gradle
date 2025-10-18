@@ -1,0 +1,50 @@
+def setupCommon() {
+    apply plugin: 'fabric-loom'
+
+    loom {
+        def file = project(":common").file("src/main/resources/${project.mod_id}.accesswidener")
+        if (file.exists()) {
+            accessWidenerPath = file
+        }
+        
+        mixin {
+            useLegacyMixinAp = false
+        }
+    }
+
+    dependencies {
+        minecraft "com.mojang:minecraft:${project.minecraft_version}"
+        mappings loom.officialMojangMappings()
+
+        testImplementation platform('org.junit:junit-bom:5.10.3')
+        testImplementation 'org.junit.jupiter:junit-jupiter'
+
+        compileOnly group: 'org.spongepowered', name: 'mixin', version: '0.8.5'
+    }
+
+    test {
+        useJUnitPlatform()
+    }
+
+    repositories {
+        maven {
+            url = "https://repo.spongepowered.org/repository/maven-public/"
+            content {
+                includeGroup "org.spongepowered"
+            }
+        }
+    }
+
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                artifactId = rootProject.archivesBaseName + "-common"
+                from components.java
+            }
+        }
+    }
+}
+
+ext {
+    setupCommon = this.&setupCommon
+}
