@@ -9,6 +9,13 @@ def setupNeoForge() {
     def accessWidenerExists = accessWidenerFile.exists()
     def accessTransformerFile = layout.buildDirectory.dir("resources/main/META-INF").map { it.file("accesstransformer.cfg") }
 
+    sourceSets.main.resources {
+        def generatedDir = project(":common").file("src/main/generated")
+        if (generatedDir.exists()) {
+            srcDirs += generatedDir
+        }
+    }
+
     // Task to copy the access transformer file
     tasks.register("generateAccessTransformer") {
         if (!accessWidenerExists) {
@@ -51,20 +58,6 @@ def setupNeoForge() {
             server {
                 server()
                 systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
-            }
-
-            data {
-                def mcVersionParts = project.minecraft_version.tokenize('.')
-                def minor = mcVersionParts.size() > 1 ? mcVersionParts[1] : '0'
-                def patch = mcVersionParts.size() > 2 ? mcVersionParts[2] : '0'
-
-                if (minor.toInteger() > 21 || (minor.toInteger() == 21 && patch.toInteger() >= 1)) {
-                    clientData()
-                } else {
-                    data()
-                }
-
-                programArguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
             }
         }
 
