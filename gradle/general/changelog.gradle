@@ -25,7 +25,8 @@ def createChangelog() {
     }
 
     if (changelogOutput.isEmpty()) {
-        throw new GradleException("No changelog entry found for version ${projectVersion}.")
+        println("Warning: No changelog entry found for version ${projectVersion}.")
+        changelogOutput = "No changelog available for this version."
     }
 
     return changelogOutput.trim()
